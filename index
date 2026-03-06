@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shuttlecock Bounce</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(#2b2b2b, #111);
+      color: #fff;
+      overflow: hidden;
+    }
+
+    .screen {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(0,0,0,0.85);
+      z-index: 10;
+      text-align: center;
+    }
+
+    button {
+      padding: 14px 32px;
+      font-size: 20px;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      background: #4caf50;
+      color: white;
+      margin: 8px;
+      min-width: 160px;
+    }
+
+    #hud {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      font-size: 18px;
+      z-index: 5;
+      background: rgba(0,0,0,0.4);
+      padding: 10px 14px;
+      border-radius: 12px;
+    }
+
+    #pauseBtn, #menuBtn {
+      position: absolute;
+      right: 12px;
+      font-size: 14px;
+      padding: 8px 14px;
+      border-radius: 10px;
+    }
+
+    #pauseBtn { top: 12px; background: #ff9800; }
+    #menuBtn { top: 52px; background: #607d8b; }
+
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+
+<!-- MAIN MENU -->
+<div id="menu" class="screen">
+  <h1>Shuttlecock Bounce</h1>
+  <button id="playBtn">Play</button>
+  <p style="max-width:420px;margin-top:16px;opacity:0.85;">
+    Keep the shuttlecock bouncing! Strike the bottom of the cork to keep it in the sky!
+  </p>
+</div>
+
+<!-- DIFFICULTY MENU -->
+<div id="difficulty" class="screen" style="display:none;">
+  <h2>Select Difficulty</h2>
+  <button data-diff="easy">Easy</button>
+  <button data-diff="normal">Normal</button>
+  <button data-diff="hard">Hard</button>
+</div>
+
+<!-- GAME OVER -->
+<div id="gameOver" class="screen" style="display:none;">
+  <h1>Game Over</h1>
+  <p id="finalScore"></p>
+  <p id="bestScore"></p>
+  <button id="restartBtn">Restart</button>
+  <button id="gameOverMenuBtn">Main Menu</button>
+</div>
+
+<div id="hud" style="display:none;">
+  Score: <span id="score">0</span><br />
+  High Score: <span id="highScore">0</span>
+</div>
+
+<button id="pauseBtn" style="display:none;">Pause</button>
+<button id="menuBtn" style="display:none;">Main Menu</button>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------------- STATE ----------------
+let running = false;
+let paused = false;
+let score = 0;
+let highScore = Number(localStorage.getItem('shuttleHighScore')) || 0;
+let bounceBoost = 0;
+let difficultyKey = null;
+let wobble = 0;
+
+const difficulties = {
+  easy:   { gravity: 0.26, bounceBase: -10.8, gravityScale: 0.00005 },
+  normal: { gravity: 0.30, bounceBase: -10.2, gravityScale: 0.00007 },
+  hard:   { gravity: 0.34, bounceBase: -9.6,  gravityScale: 0.0001 }
+};
+
+let difficulty = { ...difficulties.normal };
+
+const shuttle = {
+  x: 0,
+  y: 0,
+  vy: 0,
+  corkRadius: 30,
+  featherRadius: 75
+};
+
+const scoreEl = document.getElementById('score');
+const highScoreEl = document.getElementById('highScore');
+const pauseBtn = document.getElementById('pauseBtn');
+const menuBtn = document.getElementById('menuBtn');
+
+highScoreEl.textContent = highScore;
+
+function resetGame() {
+  shuttle.x = canvas.width / 2;
+  shuttle.y = canvas.height / 3;
+  shuttle.vy = 0;
+  bounceBoost = 0;
+  wobble = 0;
+  score = 0;
+  scoreEl.textContent = score;
+}
+
+// ---------------- DRAW SHUTTLECOCK ----------------
+function drawShuttle() {
+  ctx.save();
+  ctx.translate(shuttle.x, shuttle.y);
+
+  // Subtle rotation wobble (very small, realistic)
+  wobble += shuttle.vy * 0.0006;
+  ctx.rotate(Math.sin(wobble) * 0.12);
+
+  const featherCount = 16;
+  const topRadius = shuttle.featherRadius;
+  const bottomRadius = shuttle.corkRadius * 1.4;
+  const height = shuttle.featherRadius * 1.4;
+
+  ctx.fillStyle = '#f7f7f7';
+  for (let i = 0; i < featherCount; i++) {
+    const a1 = (Math.PI * 2 / featherCount) * i;
+    const a2 = (Math.PI * 2 / featherCount) * (i + 1);
+
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a1) * bottomRadius, Math.sin(a1) * bottomRadius);
+    ctx.lineTo(Math.cos(a1) * topRadius, -height);
+    ctx.lineTo(Math.cos(a2) * topRadius, -height);
+    ctx.lineTo(Math.cos(a2) * bottomRadius, Math.sin(a2) * bottomRadius);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = 'rgba(220,220,220,0.9)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < featherCount; i++) {
+    const a = (Math.PI * 2 / featherCount) * i;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * bottomRadius, Math.sin(a) * bottomRadius);
+    ctx.lineTo(Math.cos(a) * topRadius, -height);
+    ctx.stroke();
+  }
+
+  // ---- CORK ----
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.arc(4, 6, shuttle.corkRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  const grad = ctx.createRadialGradient(-5, -6, shuttle.corkRadius * 0.3, 0, 0, shuttle.corkRadius);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(1, '#e0e0e0');
+
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(0, 0, shuttle.corkRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#1b5e20';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(0, 0, shuttle.corkRadius + 1, Math.PI * 0.1, Math.PI * 0.9);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ---------------- GAME LOOP ----------------
+function update() {
+  if (!running || paused) return;
+
+  difficulty.gravity += difficulty.gravityScale;
+  shuttle.vy += difficulty.gravity;
+  shuttle.y += shuttle.vy;
+
+  if (shuttle.y + shuttle.corkRadius > canvas.height) {
+    endGame();
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawShuttle();
+}
+
+function loop() {
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+loop();
+
+// ---------------- INPUT ----------------
+canvas.addEventListener('pointerdown', (e) => {
+  if (!running || paused) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  const dx = x - shuttle.x;
+  const dy = y - shuttle.y;
+  const dist = Math.hypot(dx, dy);
+
+  // Cork hit
+  if (dist <= shuttle.corkRadius * 2.2 && dy >= -shuttle.corkRadius * 0.3) {
+    bounceBoost += 0.45;
+    shuttle.vy = difficulty.bounceBase - bounceBoost;
+    score++;
+    scoreEl.textContent = score;
+
+    // Update high score immediately
+    if (score > highScore) {
+      highScore = score;
+      highScoreEl.textContent = highScore;
+      localStorage.setItem('shuttleHighScore', highScore);
+    }
+  }
+  // Feather hit
+  else if (y < shuttle.y && y > shuttle.y - shuttle.featherRadius) {
+    shuttle.vy = -3.2;
+    shuttle.x += (Math.random() - 0.5) * 120;
+  }
+});
+
+// ---------------- GAME END ----------------
+function endGame() {
+  running = false;
+  paused = false;
+  document.getElementById('hud').style.display = 'none';
+  pauseBtn.style.display = 'none';
+  menuBtn.style.display = 'none';
+  document.getElementById('gameOver').style.display = 'flex';
+
+  document.getElementById('finalScore').textContent = 'Score: ' + score;
+  document.getElementById('bestScore').textContent = 'High Score: ' + highScore;
+}
+
+pauseBtn.onclick = () => {
+  paused = !paused;
+  pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+};
+
+menuBtn.onclick = () => {
+  running = false;
+  paused = false;
+  document.getElementById('hud').style.display = 'none';
+  pauseBtn.style.display = 'none';
+  menuBtn.style.display = 'none';
+  document.getElementById('menu').style.display = 'flex';
+};
+
+// ---------------- UI FLOW ----------------
+document.getElementById('playBtn').onclick = () => {
+  document.getElementById('menu').style.display = 'none';
+  document.getElementById('difficulty').style.display = 'flex';
+};
+
+document.querySelectorAll('#difficulty button').forEach(btn => {
+  btn.onclick = () => {
+    difficultyKey = btn.dataset.diff;
+    difficulty = { ...difficulties[difficultyKey] };
+    document.getElementById('difficulty').style.display = 'none';
+    document.getElementById('hud').style.display = 'block';
+    pauseBtn.style.display = 'block';
+    menuBtn.style.display = 'block';
+    resetGame();
+    running = true;
+  };
+});
+
+document.getElementById('restartBtn').onclick = () => {
+  document.getElementById('gameOver').style.display = 'none';
+  document.getElementById('hud').style.display = 'block';
+  pauseBtn.style.display = 'block';
+  menuBtn.style.display = 'block';
+  difficulty = { ...difficulties[difficultyKey || 'normal'] };
+  resetGame();
+  running = true;
+};
+
+document.getElementById('gameOverMenuBtn').onclick = () => {
+  document.getElementById('gameOver').style.display = 'none';
+  document.getElementById('menu').style.display = 'flex';
+};
+</script>
+
+</body>
+</html>
