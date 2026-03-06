@@ -1,2 +1,2 @@
-#Shuttlecock Bounce
-#Keep the shuttle in the air!
+Shuttlecock Bounce
+Keep the shuttle in the air!
